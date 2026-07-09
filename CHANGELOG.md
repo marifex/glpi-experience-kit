@@ -123,6 +123,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   count) and Health Check actions on the Recent Runs table, a live
   progress view for in-progress purges, and a results panel for the most
   recently run health check.
+- Console commands (the doc's own §9 recommendation, as a fast SSH-driven
+  alternative to waiting on cron ticks), auto-discovered by GLPI's
+  `bin/console` under the `plugins:experiencekit:` namespace and built on
+  `Glpi\Console\AbstractCommand` (reusing its `--username`-based session
+  bootstrap, the same `Auth`/`Session::init()` trick documented in §2.1,
+  rather than reimplementing it): `generate` (start or `--run=ID` resume,
+  loops the same `GenerationOrchestrator` the UI/cron use until done),
+  `purge` (`--run=ID` or `--all`, interactive confirmation showing the
+  exact count unless `--no-interaction`), `health-check` (`--run=ID` or
+  every run; exits non-zero on any FAIL so it can gate a CI pipeline -
+  the doc's own "automated regression test" ask), and `status` (a table
+  of recent runs and their record counts). Verified end-to-end via
+  `bin/console`: a full Small-profile `generate` reached "completed",
+  `health-check` against it passed all checks (750/750, 14/14, 40/40
+  requester links), and `purge` (confirmed via piped stdin) removed all
+  1,526 records and restored the database to its exact baseline.
 
 ### Fixed
 - `front/config.php`'s legacy `../../../inc/includes.php` relative include
