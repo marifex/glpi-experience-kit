@@ -30,6 +30,7 @@ function plugin_experiencekit_install()
         $query = "CREATE TABLE `glpi_plugin_experiencekit_runs` (
             `id` int {$default_key_sign} NOT NULL AUTO_INCREMENT,
             `name` varchar(255) DEFAULT NULL,
+            `organization_name` varchar(255) NOT NULL DEFAULT 'MarifeX',
             `status` varchar(20) NOT NULL DEFAULT 'pending',
             `volume_profile` varchar(20) NOT NULL DEFAULT 'medium',
             `profile_json` mediumtext DEFAULT NULL,
@@ -99,6 +100,9 @@ function plugin_experiencekit_install()
         ) ENGINE=InnoDB DEFAULT CHARSET={$default_charset} COLLATE={$default_collation} ROW_FORMAT=DYNAMIC";
         $DB->doQuery($query) or die($DB->error());
     }
+
+    // Upgrade-safe for installs created before organization_name existed.
+    $migration->addField('glpi_plugin_experiencekit_runs', 'organization_name', 'string', ['value' => 'MarifeX', 'after' => 'name']);
 
     $migration->executeMigration();
 

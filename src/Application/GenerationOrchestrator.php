@@ -34,8 +34,12 @@ final class GenerationOrchestrator
     ) {
     }
 
-    public function startRun(string $volumeProfileName, int $usersId, ?string $name = null): PluginExperiencekitRun
-    {
+    public function startRun(
+        string $volumeProfileName,
+        int $usersId,
+        ?string $name = null,
+        string $organizationName = 'MarifeX',
+    ): PluginExperiencekitRun {
         $profile = VolumeProfileFactory::make($volumeProfileName);
         // Bounded to fit the `seed` column (signed 32-bit int), not PHP_INT_MAX.
         $seed = random_int(1, 2147483647);
@@ -43,7 +47,7 @@ final class GenerationOrchestrator
         $useNotifications = (bool) Config::getConfigurationValue('core', 'use_notifications');
         $notificationsMailing = (bool) Config::getConfigurationValue('core', 'notifications_mailing');
 
-        $run = $this->runs->create($profile, $usersId, $name, $seed, $useNotifications, $notificationsMailing);
+        $run = $this->runs->create($profile, $usersId, $name, $organizationName, $seed, $useNotifications, $notificationsMailing);
 
         foreach (GenerationPhase::ordered() as $phase) {
             $this->phaseProgress->createPending($run, $phase);

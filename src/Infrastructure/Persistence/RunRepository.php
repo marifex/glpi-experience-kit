@@ -17,6 +17,7 @@ final class RunRepository
         VolumeProfile $profile,
         int $usersId,
         ?string $name,
+        string $organizationName,
         int $seed,
         bool $notificationsWasEnabled,
         bool $notificationsMailingWasEnabled,
@@ -24,6 +25,7 @@ final class RunRepository
         $run = new PluginExperiencekitRun();
         $id = $run->add([
             'name'                                => $name ?? sprintf('%s run - %s', ucfirst($profile->name), date('Y-m-d H:i')),
+            'organization_name'                   => $organizationName,
             'status'                               => PluginExperiencekitRun::STATUS_PENDING,
             'volume_profile'                       => $profile->name,
             'profile_json'                         => json_encode($profile->toArray()),

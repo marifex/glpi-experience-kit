@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace GlpiPlugin\Experiencekit\Infrastructure\Support;
 
 use GlpiPlugin\Experiencekit\Application\GenerationOrchestrator;
+use GlpiPlugin\Experiencekit\Domain\GenerationPhase;
+use GlpiPlugin\Experiencekit\Infrastructure\Builder\OrgStructureBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\PhaseProgressRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\RegistryRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\RunRepository;
@@ -33,9 +35,9 @@ final class OrchestratorFactory
     /** @return array<string,\GlpiPlugin\Experiencekit\Application\PhaseBuilderInterface> */
     private static function builders(): array
     {
-        // Populated as each phase builder lands. Deliberately empty for now
-        // - see PluginExperiencekitRun::cronProcessBatch() and the "Skeleton"
-        // build step for why a run cannot yet be started.
-        return [];
+        // Populated as each phase builder lands - see the roadmap.
+        return [
+            GenerationPhase::ORG_STRUCTURE->value => new OrgStructureBuilder(),
+        ];
     }
 }

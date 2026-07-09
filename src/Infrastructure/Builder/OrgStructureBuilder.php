@@ -1,0 +1,397 @@
+<?php
+
+declare(strict_types=1);
+
+namespace GlpiPlugin\Experiencekit\Infrastructure\Builder;
+
+use Entity;
+use GlpiPlugin\Experiencekit\Application\BatchResult;
+use GlpiPlugin\Experiencekit\Application\PhaseBuilderInterface;
+use GlpiPlugin\Experiencekit\Application\RunContext;
+use GlpiPlugin\Experiencekit\Domain\Exception\GenerationException;
+use GlpiPlugin\Experiencekit\Domain\GenerationPhase;
+use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\RandomDataProvider;
+use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\WeightedDistributor;
+use Group;
+use Group_User;
+use Location;
+use User;
+
+/**
+ * Phase 1: Entities, Locations, Groups, Users. Every later phase depends on
+ * IDs this one registers, so it always runs first.
+ *
+ * Branch weights (HQ-New York 50% / West-Austin 30% / EMEA-London 20%) and
+ * the fixed 9-group support taxonomy (6 technician/support + 2 CAB + 1 VIP
+ * utility group) reproduce the original dataset's org design (§3) exactly;
+ * only headcount/location/department counts scale with the volume profile.
+ */
+final class OrgStructureBuilder implements PhaseBuilderInterface
+{
+    private const BRANCHES = [
+        'hq_ny'       => ['name' => 'HQ - New York', 'weight' => 0.50],
+        'west_austin' => ['name' => 'West - Austin', 'weight' => 0.30],
+        'emea_london' => ['name' => 'EMEA - London', 'weight' => 0.20],
+    ];
+
+    private const SHARED_LOCATIONS = [
+        'Primary Data Center', 'Disaster Recovery Site', 'Executive Suite', 'Central Warehouse',
+        'Remote / Home Office Pool', 'Training Center', 'Network Operations Center', 'Archive Storage',
+    ];
+
+    private const BRANCH_LOCATION_ARCHETYPES = [
+        'Main Office Floor', 'Reception', 'Server Room', 'Conference Center', 'IT Support Desk',
+    ];
+
+    private const SUPPORT_GROUPS = [
+        'Systems & Infrastructure Team', 'Service Desk - Tier 1', 'Service Desk - Tier 2',
+        'Network Operations', 'Applications Support', 'Field Services',
+    ];
+
+    private const CAB_GROUPS = ['IT Change Advisory Board', 'Security & Infrastructure CAB'];
+
+    private const VIP_GROUP = 'VIP Requesters';
+
+    private const DEPARTMENT_POOL = [
+        'Human Resources', 'Finance', 'Sales', 'Marketing', 'Legal', 'Operations', 'Procurement',
+        'Engineering', 'Customer Success', 'Facilities', 'Product Management', 'Quality Assurance',
+        'Research & Development', 'Executive Office',
+    ];
+
+    private const PROFILE_WEIGHTS = [
+        'Self-Service' => 0.90,
+        'Technician'   => 0.06,
+        'Supervisor'   => 0.02,
+        'Admin'        => 0.02,
+    ];
+
+    private const VIP_RATIO = 18 / 500;
+    private const EMAIL_DOMAIN = 'demo.experiencekit.invalid';
+    private const DEFAULT_PASSWORD = 'Demo!2026';
+
+    public function getPhase(): GenerationPhase
+    {
+        return GenerationPhase::ORG_STRUCTURE;
+    }
+
+    public function plan(RunContext $context): int
+    {
+        $profile = $context->profile;
+        return 4 + $profile->locations + $profile->groups + $profile->usersTotal;
+    }
+
+    public function runBatch(RunContext $context, int $batchSize): BatchResult
+    {
+        $processed = 0;
+        $remaining = $batchSize;
+
+        $remaining = $this->stage($context, $remaining, $processed, 'Entity', 4, fn (int $seq) => $this->createEntity($context, $seq));
+
+        if ($remaining > 0) {
+            $remaining = $this->stage($context, $remaining, $processed, 'Location', $context->profile->locations, fn (int $seq) => $this->createLocation($context, $seq));
+        }
+
+        if ($remaining > 0) {
+            $remaining = $this->stage($context, $remaining, $processed, 'Group', $context->profile->groups, fn (int $seq) => $this->createGroup($context, $seq));
+        }
+
+        if ($remaining > 0) {
+            $this->stage($context, $remaining, $processed, 'User', $context->profile->usersTotal, fn (int $seq) => $this->createUser($context, $seq));
+        }
+
+        $complete = $context->registeredCount('Entity', $this->getPhase()) >= 4
+            && $context->registeredCount('Location', $this->getPhase()) >= $context->profile->locations
+            && $context->registeredCount('Group', $this->getPhase()) >= $context->profile->groups
+            && $context->registeredCount('User', $this->getPhase()) >= $context->profile->usersTotal;
+
+        return new BatchResult($processed, $complete);
+    }
+
+    /** Processes up to $remaining units of one itemtype, calling $createOne(sequence) for each. Returns budget left. */
+    private function stage(RunContext $context, int $remaining, int &$processed, string $itemtype, int $target, callable $createOne): int
+    {
+        $existing = $context->registeredCount($itemtype, $this->getPhase());
+        $need = max(0, $target - $existing);
+        $count = min($need, $remaining);
+
+        for ($i = 0; $i < $count; $i++) {
+            $createOne($existing + $i);
+        }
+
+        $processed += $count;
+        return $remaining - $count;
+    }
+
+    private function orgRootEntityId(RunContext $context): int
+    {
+        $ids = $context->registeredIds('Entity', $this->getPhase());
+        if (count($ids) === 0) {
+            throw new GenerationException('Org root entity has not been created yet.');
+        }
+        return $ids[0];
+    }
+
+    /** @return array<string,int> branch key => entities_id, in BRANCHES order. */
+    private function branchEntityIds(RunContext $context): array
+    {
+        $ids = $context->registeredIds('Entity', $this->getPhase());
+        if (count($ids) < 4) {
+            throw new GenerationException('Branch entities have not all been created yet.');
+        }
+        $keys = array_keys(self::BRANCHES);
+        return array_combine($keys, [$ids[1], $ids[2], $ids[3]]);
+    }
+
+    private function createEntity(RunContext $context, int $seq): void
+    {
+        $entity = new Entity();
+
+        if ($seq === 0) {
+            $id = $entity->add([
+                'name'        => $context->run->fields['organization_name'],
+                'entities_id' => 0,
+                'comment'     => 'Generated by GLPI Experience Kit.',
+            ]);
+        } else {
+            $branch = array_values(self::BRANCHES)[$seq - 1];
+            $id = $entity->add([
+                'name'        => $branch['name'],
+                'entities_id' => $this->orgRootEntityId($context),
+                'comment'     => sprintf('Generated by GLPI Experience Kit (weight %.0f%%).', $branch['weight'] * 100),
+            ]);
+        }
+
+        if (!$id) {
+            throw new GenerationException("Failed to create entity at sequence {$seq}.");
+        }
+
+        $context->register($this->getPhase(), 'Entity', (int) $id);
+    }
+
+    private function createLocation(RunContext $context, int $seq): void
+    {
+        $total = $context->profile->locations;
+        $branchIds = $this->branchEntityIds($context);
+        $rootId = $this->orgRootEntityId($context);
+
+        $counts = WeightedDistributor::distribute($total, [
+            'hq_ny'       => self::BRANCHES['hq_ny']['weight'],
+            'west_austin' => self::BRANCHES['west_austin']['weight'],
+            'emea_london' => self::BRANCHES['emea_london']['weight'],
+            'shared'      => 8 / 18,
+        ], ['hq_ny' => 1, 'west_austin' => 1, 'emea_london' => 1, 'shared' => 1]);
+
+        [$bucket, $indexInBucket] = $this->bucketForSequence($seq, $counts);
+
+        $rng = new RandomDataProvider($context->seed());
+
+        if ($bucket === 'shared') {
+            $name = self::SHARED_LOCATIONS[$indexInBucket % count(self::SHARED_LOCATIONS)];
+            if ($indexInBucket >= count(self::SHARED_LOCATIONS)) {
+                $name .= ' ' . (intdiv($indexInBucket, count(self::SHARED_LOCATIONS)) + 1);
+            }
+            $entitiesId = $rootId;
+            $isRecursive = 1;
+        } else {
+            $archetype = self::BRANCH_LOCATION_ARCHETYPES[$indexInBucket % count(self::BRANCH_LOCATION_ARCHETYPES)];
+            $name = self::BRANCHES[$bucket]['name'] . ' - ' . $archetype;
+            if ($indexInBucket >= count(self::BRANCH_LOCATION_ARCHETYPES)) {
+                $name .= ' ' . (intdiv($indexInBucket, count(self::BRANCH_LOCATION_ARCHETYPES)) + 1);
+            }
+            $entitiesId = $branchIds[$bucket];
+            $isRecursive = 0;
+        }
+
+        $location = new Location();
+        $id = $location->add([
+            'name'         => $name,
+            'entities_id'  => $entitiesId,
+            'is_recursive' => $isRecursive,
+        ]);
+
+        if (!$id) {
+            throw new GenerationException("Failed to create location at sequence {$seq}.");
+        }
+
+        $context->register($this->getPhase(), 'Location', (int) $id);
+    }
+
+    private function createGroup(RunContext $context, int $seq): void
+    {
+        $rootId = $this->orgRootEntityId($context);
+        $fixedCount = count(self::SUPPORT_GROUPS) + count(self::CAB_GROUPS) + 1;
+
+        $group = new Group();
+
+        if ($seq < count(self::SUPPORT_GROUPS)) {
+            $id = $group->add([
+                'name'         => self::SUPPORT_GROUPS[$seq],
+                'entities_id'  => $rootId,
+                'is_recursive' => 1,
+                'is_assign'    => 1,
+                'is_requester' => 0,
+            ]);
+        } elseif ($seq < count(self::SUPPORT_GROUPS) + count(self::CAB_GROUPS)) {
+            $cabIndex = $seq - count(self::SUPPORT_GROUPS);
+            $id = $group->add([
+                'name'         => self::CAB_GROUPS[$cabIndex],
+                'entities_id'  => $rootId,
+                'is_recursive' => 1,
+                'is_assign'    => 0,
+                'is_requester' => 0,
+            ]);
+        } elseif ($seq < $fixedCount) {
+            $id = $group->add([
+                'name'         => self::VIP_GROUP,
+                'entities_id'  => $rootId,
+                'is_recursive' => 1,
+                'is_assign'    => 0,
+                'is_requester' => 1,
+            ]);
+        } else {
+            $deptIndex = $seq - $fixedCount;
+            $branchIds = $this->branchEntityIds($context);
+            $deptCounts = WeightedDistributor::distribute(
+                max(0, $context->profile->groups - $fixedCount),
+                array_map(static fn (array $b) => $b['weight'], self::BRANCHES)
+            );
+            [$branchKey, $indexInBranch] = $this->bucketForSequence($deptIndex, $deptCounts);
+
+            $name = self::DEPARTMENT_POOL[$indexInBranch % count(self::DEPARTMENT_POOL)];
+            if ($indexInBranch >= count(self::DEPARTMENT_POOL)) {
+                $name .= ' ' . (intdiv($indexInBranch, count(self::DEPARTMENT_POOL)) + 1);
+            }
+
+            $id = $group->add([
+                'name'         => $name . ' - ' . self::BRANCHES[$branchKey]['name'],
+                'entities_id'  => $branchIds[$branchKey],
+                'is_recursive' => 0,
+                'is_assign'    => 0,
+                'is_requester' => 1,
+            ]);
+        }
+
+        if (!$id) {
+            throw new GenerationException("Failed to create group at sequence {$seq}.");
+        }
+
+        $context->register($this->getPhase(), 'Group', (int) $id);
+    }
+
+    private function createUser(RunContext $context, int $seq): void
+    {
+        $profile = $context->profile;
+        $rng = new RandomDataProvider($context->seed());
+        $branchIds = $this->branchEntityIds($context);
+
+        $name = $rng->fullName($seq);
+        $login = sprintf(
+            '%s.%s.%d',
+            strtolower($this->slug($name['firstname'])),
+            strtolower($this->slug($name['lastname'])),
+            $seq
+        );
+        $email = $login . '@' . self::EMAIL_DOMAIN;
+
+        $profileCounts = WeightedDistributor::distribute($profile->usersTotal, self::PROFILE_WEIGHTS);
+        [$profileName, ] = $this->bucketForSequence($seq, $profileCounts);
+        $profilesId = $this->profileIdByName($profileName);
+
+        $userCounts = WeightedDistributor::distribute($profile->usersTotal, array_map(
+            static fn (array $b) => $b['weight'],
+            self::BRANCHES
+        ));
+        [$branchKey, ] = $this->bucketForSequence($seq, $userCounts);
+
+        $vipCount = (int) round($profile->usersTotal * self::VIP_RATIO);
+        $isVip = $seq < $vipCount;
+        $isExited = $seq >= $vipCount && $seq < $vipCount + $profile->usersExited;
+        $isOnboarding = $seq >= $profile->usersTotal - $profile->usersOnboardingCohort;
+
+        $input = [
+            'name'          => $login,
+            'firstname'     => $name['firstname'],
+            'realname'      => $name['lastname'],
+            'password'      => self::DEFAULT_PASSWORD,
+            'is_active'     => $isExited ? 0 : 1,
+            '_useremails'   => [-1 => $email],
+            '_default_email' => -1,
+            '_profiles_id'  => $profilesId,
+            '_entities_id'  => $branchIds[$branchKey],
+            '_is_recursive' => 0,
+        ];
+
+        if ($isOnboarding) {
+            $input['begin_date'] = date('Y-m-d', strtotime('-' . $rng->intBetween(1, 45, $seq) . ' days'));
+        }
+        if ($isExited) {
+            $input['end_date'] = date('Y-m-d', strtotime('-' . $rng->intBetween(1, 90, $seq) . ' days'));
+        }
+
+        $user = new User();
+        $id = $user->add($input);
+
+        if (!$id) {
+            throw new GenerationException("Failed to create user at sequence {$seq} (login \"{$login}\").");
+        }
+
+        if ($isVip) {
+            $this->addToNamedGroup($context, (int) $id, self::VIP_GROUP);
+        }
+
+        $context->register($this->getPhase(), 'User', (int) $id, $isVip ? 'vip' : null);
+    }
+
+    private function addToNamedGroup(RunContext $context, int $usersId, string $groupName): void
+    {
+        $groupIds = $context->registeredIds('Group', $this->getPhase());
+        foreach ($groupIds as $groupsId) {
+            $group = new Group();
+            if ($group->getFromDB($groupsId) && $group->fields['name'] === $groupName) {
+                $link = new Group_User();
+                $link->add(['groups_id' => $groupsId, 'users_id' => $usersId]);
+                return;
+            }
+        }
+    }
+
+    private function profileIdByName(string $name): int
+    {
+        static $cache = [];
+        if (isset($cache[$name])) {
+            return $cache[$name];
+        }
+
+        $profile = new \Profile();
+        if (!$profile->getFromDBByCrit(['name' => $name])) {
+            throw new GenerationException("GLPI profile \"{$name}\" does not exist.");
+        }
+
+        return $cache[$name] = (int) $profile->fields['id'];
+    }
+
+    private function slug(string $value): string
+    {
+        return preg_replace('/[^a-z0-9]+/', '', strtolower($value)) ?? '';
+    }
+
+    /**
+     * Given a flat sequence index and an ordered map of bucket => count,
+     * returns [bucketKey, indexWithinThatBucket].
+     *
+     * @param array<string,int> $counts
+     * @return array{0:string,1:int}
+     */
+    private function bucketForSequence(int $seq, array $counts): array
+    {
+        $cursor = 0;
+        foreach ($counts as $key => $count) {
+            if ($seq < $cursor + $count) {
+                return [$key, $seq - $cursor];
+            }
+            $cursor += $count;
+        }
+        $lastKey = array_key_last($counts) ?? array_key_first($counts);
+        return [$lastKey, $seq - $cursor];
+    }
+}
