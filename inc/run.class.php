@@ -68,6 +68,42 @@ class PluginExperiencekitRun extends CommonDBTM
         };
     }
 
+    /**
+     * GLPI cron entry point (registered as PluginExperiencekitRun /
+     * ProcessBatch in hook.php). Advances every currently-running run by
+     * one bounded batch. A run that fails or completes mid-loop does not
+     * stop the others from being processed in the same tick.
+     *
+     * @return int >0 done, 0 nothing to do
+     */
+    public static function cronProcessBatch(CronTask $task): int
+    {
+        $batchSize = (int) ($task->fields['param'] ?? 0);
+        if ($batchSize <= 0) {
+            $batchSize = 200;
+        }
+
+        $repository = new \GlpiPlugin\Experiencekit\Infrastructure\Persistence\RunRepository();
+        $runningRuns = $repository->findByStatus(self::STATUS_RUNNING);
+
+        if (count($runningRuns) === 0) {
+            return 0;
+        }
+
+        $orchestrator = \GlpiPlugin\Experiencekit\Infrastructure\Support\OrchestratorFactory::make();
+
+        foreach ($runningRuns as $run) {
+            try {
+                $orchestrator->runNextBatch($run, $batchSize);
+                $task->addVolume(1);
+            } catch (\Throwable $e) {
+                $task->log('Run #' . $run->getID() . ' failed: ' . $e->getMessage());
+            }
+        }
+
+        return 1;
+    }
+
     public function getStatusLabel(): string
     {
         return match ($this->fields['status'] ?? self::STATUS_PENDING) {
