@@ -40,6 +40,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   Groups/Users appear, all registry-tracked.
 - `organization_name` column on `glpi_plugin_experiencekit_runs` (defaults
   to "MarifeX", configurable per run from the Generate form).
+- `SequentialPhaseBuilder`: extracted the "process an ordered list of N-of-X
+  stages, resumable via the registry" logic shared by `OrgStructureBuilder`
+  and `CmdbBuilder` into a common base class.
+- `CmdbBuilder`: the second phase builder - States, Manufacturers,
+  PeripheralType, ContractTypes, SoftwareLicenseTypes, Suppliers, Software,
+  SoftwareLicenses, the six asset types, and Contracts (~10% pre-expired,
+  ~10% expiring within 45 days). Retired/Disposed computers are tagged
+  `retired_computer` in the registry for the future laptop-replacement
+  scenario to find. Shared taxonomy dropdowns (States, Manufacturers, etc.)
+  are resolved idempotently (find-by-name-or-create) and deliberately never
+  registered for purge, since they're reusable GLPI-wide values, not this
+  run's content.
 
 ### Fixed
 - `front/config.php`'s legacy `../../../inc/includes.php` relative include
@@ -63,3 +75,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   (`Glpi\Controller\LegacyFileLoadController`), which rewrites
   `$_SERVER['PHP_SELF']` to the router's own script instead of this file's
   actual path. Anchored form actions on `Plugin::getWebDir()` instead.
+- `CommonDBTM::getFromDBByCrit()` throws `TooManyResultsException` on an
+  ambiguous match rather than returning one; a stock GLPI "OEM"
+  `SoftwareLicenseType` fixture plus an earlier data load's own "OEM" both
+  matched, crashing taxonomy resolution. Switched to `find(..., limit: 1)`,
+  which tolerates duplicates.
+- Branch-entity assignment for CMDB assets put 100% of a batch in a single
+  entity instead of the intended 50/30/20 split: the picker derived its
+  random roll as `seq % 1_000_000` offset by a large per-asset-type
+  constant, so a small asset count (e.g. 40 computers) never spanned more
+  than one bucket of a million-wide weighted range. Replaced with the same
+  proven per-call `RandomDataProvider::weightedPick()` already used
+  correctly for state assignment.

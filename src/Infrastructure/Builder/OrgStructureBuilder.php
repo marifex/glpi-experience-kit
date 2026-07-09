@@ -5,12 +5,11 @@ declare(strict_types=1);
 namespace GlpiPlugin\Experiencekit\Infrastructure\Builder;
 
 use Entity;
-use GlpiPlugin\Experiencekit\Application\BatchResult;
-use GlpiPlugin\Experiencekit\Application\PhaseBuilderInterface;
 use GlpiPlugin\Experiencekit\Application\RunContext;
 use GlpiPlugin\Experiencekit\Domain\Exception\GenerationException;
 use GlpiPlugin\Experiencekit\Domain\GenerationPhase;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\RandomDataProvider;
+use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\SequentialPhaseBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\WeightedDistributor;
 use Group;
 use Group_User;
@@ -26,7 +25,7 @@ use User;
  * utility group) reproduce the original dataset's org design (§3) exactly;
  * only headcount/location/department counts scale with the volume profile.
  */
-final class OrgStructureBuilder implements PhaseBuilderInterface
+final class OrgStructureBuilder extends SequentialPhaseBuilder
 {
     private const BRANCHES = [
         'hq_ny'       => ['name' => 'HQ - New York', 'weight' => 0.50],
@@ -74,52 +73,16 @@ final class OrgStructureBuilder implements PhaseBuilderInterface
         return GenerationPhase::ORG_STRUCTURE;
     }
 
-    public function plan(RunContext $context): int
+    protected function stages(RunContext $context): array
     {
         $profile = $context->profile;
-        return 4 + $profile->locations + $profile->groups + $profile->usersTotal;
-    }
 
-    public function runBatch(RunContext $context, int $batchSize): BatchResult
-    {
-        $processed = 0;
-        $remaining = $batchSize;
-
-        $remaining = $this->stage($context, $remaining, $processed, 'Entity', 4, fn (int $seq) => $this->createEntity($context, $seq));
-
-        if ($remaining > 0) {
-            $remaining = $this->stage($context, $remaining, $processed, 'Location', $context->profile->locations, fn (int $seq) => $this->createLocation($context, $seq));
-        }
-
-        if ($remaining > 0) {
-            $remaining = $this->stage($context, $remaining, $processed, 'Group', $context->profile->groups, fn (int $seq) => $this->createGroup($context, $seq));
-        }
-
-        if ($remaining > 0) {
-            $this->stage($context, $remaining, $processed, 'User', $context->profile->usersTotal, fn (int $seq) => $this->createUser($context, $seq));
-        }
-
-        $complete = $context->registeredCount('Entity', $this->getPhase()) >= 4
-            && $context->registeredCount('Location', $this->getPhase()) >= $context->profile->locations
-            && $context->registeredCount('Group', $this->getPhase()) >= $context->profile->groups
-            && $context->registeredCount('User', $this->getPhase()) >= $context->profile->usersTotal;
-
-        return new BatchResult($processed, $complete);
-    }
-
-    /** Processes up to $remaining units of one itemtype, calling $createOne(sequence) for each. Returns budget left. */
-    private function stage(RunContext $context, int $remaining, int &$processed, string $itemtype, int $target, callable $createOne): int
-    {
-        $existing = $context->registeredCount($itemtype, $this->getPhase());
-        $need = max(0, $target - $existing);
-        $count = min($need, $remaining);
-
-        for ($i = 0; $i < $count; $i++) {
-            $createOne($existing + $i);
-        }
-
-        $processed += $count;
-        return $remaining - $count;
+        return [
+            ['itemtype' => 'Entity', 'target' => 4, 'create' => fn (int $seq) => $this->createEntity($context, $seq)],
+            ['itemtype' => 'Location', 'target' => $profile->locations, 'create' => fn (int $seq) => $this->createLocation($context, $seq)],
+            ['itemtype' => 'Group', 'target' => $profile->groups, 'create' => fn (int $seq) => $this->createGroup($context, $seq)],
+            ['itemtype' => 'User', 'target' => $profile->usersTotal, 'create' => fn (int $seq) => $this->createUser($context, $seq)],
+        ];
     }
 
     private function orgRootEntityId(RunContext $context): int
