@@ -95,6 +95,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   expensive phase (~150-400ms per `Ticket::add()` due to full rule-engine
   evaluation, matching the doc's own §8 benchmark) - exactly why
   batching/resumability matters most here.
+- `KbAttachmentSurveyBuilder`: the sixth and final phase builder -
+  Knowledge base articles (8 categories, ~30% flagged FAQ), Document
+  attachments (~30% of all tickets, via 10 reusable placeholder templates
+  rather than one unique file per ticket), and TicketSatisfaction surveys
+  (~30% of closed tickets, weighted 1★=5%/2★=7%/3★=18%/4★=35%/5★=35%).
+  This closes the full pipeline: a Small-profile run through all six
+  phases now reaches `status=completed` end to end for the first time.
 
 ### Fixed
 - `front/config.php`'s legacy `../../../inc/includes.php` relative include
@@ -168,3 +175,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   deliberate GLPI security gate, not a bug. Added a narrow, explicitly-
   justified raw `UPDATE` of just the `status`/`validation_date` columns,
   scoped to rows this same method just created.
+- `RandomDataProvider::weightedPick()` was declared to return `string`,
+  but PHP normalizes purely-numeric string array keys back to `int`
+  (`array_combine(array_map('strval', ...), ...)` does *not* prevent
+  this - a well-known PHP gotcha), so a caller with numeric-looking keys
+  (survey star ratings 1-5) crashed with a `TypeError` the first time it
+  ran. Relaxed the return type to `int|string`, matching what PHP array
+  keys actually are.
+- Not a bug, but worth documenting so it isn't "fixed" into a real one:
+  `TicketSatisfaction::getIndexName()` returns `'tickets_id'`, not `'id'`,
+  so `add()` returns the ticket's id, not the satisfaction row's own
+  auto-increment id. Confirmed this is intentional and consistent -
+  `getFromDB()`/`delete()` key off the same `getIndexName()`, so
+  registering that returned value is exactly what a later purge needs,
+  despite looking like the wrong id at first glance.

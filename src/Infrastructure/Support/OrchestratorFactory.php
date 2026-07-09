@@ -10,6 +10,7 @@ use GlpiPlugin\Experiencekit\Domain\GenerationPhase;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\BulkTicketBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\CmdbBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\ItsmConfigBuilder;
+use GlpiPlugin\Experiencekit\Infrastructure\Builder\KbAttachmentSurveyBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\OrgStructureBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\ScenarioBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\ActiveUserFinder;
@@ -51,6 +52,7 @@ final class OrchestratorFactory
             GenerationPhase::ITSM_CONFIG->value   => new ItsmConfigBuilder(),
             GenerationPhase::SCENARIOS->value      => new ScenarioBuilder($actors, $users),
             GenerationPhase::BULK_TICKETS->value  => new BulkTicketBuilder($actors, $users),
+            GenerationPhase::KB_ATTACHMENTS_SURVEYS->value => new KbAttachmentSurveyBuilder(),
         ];
     }
 }

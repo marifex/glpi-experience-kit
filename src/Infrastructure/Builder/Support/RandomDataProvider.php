@@ -77,8 +77,18 @@ final class RandomDataProvider
         return $items[array_rand($items)];
     }
 
-    /** @param array<string,float> $weighted key => weight (need not sum to 1.0) */
-    public function weightedPick(array $weighted, int $sequence): string
+    /**
+     * @param array<int|string,float> $weighted key => weight (need not sum to 1.0)
+     *
+     * Return type is deliberately int|string, not string: PHP normalizes
+     * purely-numeric string array keys back to int (`["1" => ...]` is
+     * actually stored as `[1 => ...]`), so a caller with numeric-looking
+     * keys (e.g. star ratings 1-5) cannot force them to stay strings no
+     * matter how the array is built. Confirmed empirically - a `string`
+     * return type here threw a TypeError the first time a caller used
+     * int-like keys.
+     */
+    public function weightedPick(array $weighted, int $sequence): int|string
     {
         $this->seedRng($sequence, 7);
         $total = array_sum($weighted);
