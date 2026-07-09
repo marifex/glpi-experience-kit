@@ -13,7 +13,7 @@ if (!defined('GLPI_ROOT')) {
 
 require_once __DIR__ . '/autoload.php';
 
-define('PLUGIN_EXPERIENCEKIT_VERSION', '1.0.0-dev');
+define('PLUGIN_EXPERIENCEKIT_VERSION', '1.0.0');
 define('PLUGIN_EXPERIENCEKIT_MIN_GLPI_VERSION', '11.0');
 define('PLUGIN_EXPERIENCEKIT_MAX_GLPI_VERSION', '11.99.99');
 

@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-09
+
+First feature-complete release: all six generation phases, admin UI, background cron processing,
+health checks, purge, and console commands, verified end-to-end against a live GLPI 11.0.8 instance.
+See `docs/PROJECT_STATUS.md` for the verification summary.
+
 ### Added
 - Plugin skeleton: `setup.php`/`hook.php`/`autoload.php`, PSR-4 autoloading under
   `GlpiPlugin\Experiencekit\`.
