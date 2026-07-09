@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-09
+
+Full Medium-profile QA (the volume profile that reproduces the original reference dataset's exact §3
+inventory), run to completion post-release. Every count matched the reference exactly: 4 Entities, 18
+Locations, 21 Groups, 500 Users, 980 assets, 90 Software, 130 SoftwareLicenses, 30 Contracts, 20
+Suppliers, **7,500 Tickets, 131 Problems, 250 Changes** (all exact), 180 KB articles, 2,250 Document
+attachments (matching the doc's own "~2,250 tickets" note exactly). The health check passed 100% at full
+scale - 7,500/7,500, 131/131, 250/250 requester actor links - the doc's own historical "100% coverage
+after remediation" figure, now achieved by design on the very first run rather than a retrofit.
+
+### Fixed
+- `HealthCheckService::checkRegistryOrphans()`'s `WHERE field IN (...)` query, given the full list of a
+  run's registered ids for one itemtype in a single call, exceeded MySQL's default
+  `range_optimizer_max_mem_size` at Medium-profile volume (7,500 Ticket ids) - confirmed via the
+  resulting warning; MySQL fell back to a full table scan rather than failing, so results stayed
+  correct, but this only surfaces at realistic production volume, never at the Small-profile scale used
+  for day-to-day development testing. Chunked into batches of 1,000.
+
 ## [1.0.0] - 2026-07-09
 
 First feature-complete release: all six generation phases, admin UI, background cron processing,

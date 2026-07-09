@@ -149,8 +149,16 @@ final class HealthCheckService
             $table = $itemtype::getTable();
             $indexField = $itemtype::getIndexName();
             $existing = [];
-            foreach ($this->db->request(['SELECT' => $indexField, 'FROM' => $table, 'WHERE' => [$indexField => $ids]]) as $row) {
-                $existing[] = (int) $row[$indexField];
+            // Chunked: a single `WHERE field IN (...)` with thousands of
+            // ids (e.g. 7,500 Tickets on a Medium-profile run) exceeds
+            // MySQL's default range_optimizer_max_mem_size, falling back to
+            // a full table scan - confirmed empirically via the resulting
+            // warning. Still correct either way, but chunking keeps it fast
+            // and warning-free at realistic volumes.
+            foreach (array_chunk($ids, 1000) as $chunk) {
+                foreach ($this->db->request(['SELECT' => $indexField, 'FROM' => $table, 'WHERE' => [$indexField => $chunk]]) as $row) {
+                    $existing[] = (int) $row[$indexField];
+                }
             }
             $missing = array_diff($ids, $existing);
             if (count($missing) > 0) {
