@@ -82,6 +82,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `SequentialPhaseBuilder` stage definitions - needed once two stages in
   the same phase register the same itemtype (e.g. patching and firewall
   both creating `Change` records) and must track independent targets.
+- `ActiveUserFinder`: extracted the "users that will actually pass
+  `User::isValidUserForEntity()` as an actor" query (is_active, begin/
+  end_date validity) out of `ScenarioBuilder` into a shared support class,
+  used by both it and `BulkTicketBuilder` rather than duplicating the
+  exact same query in two places.
+- `BulkTicketBuilder`: the fifth phase builder - statistical fill of the
+  remaining Incidents/Requests/Problems/Changes needed to reach the
+  volume profile's totals, after the 7 narrative scenarios already
+  accounted for some of each (target = `profile.X - scenarioCount`,
+  computed dynamically per run rather than hardcoded). By far the most
+  expensive phase (~150-400ms per `Ticket::add()` due to full rule-engine
+  evaluation, matching the doc's own §8 benchmark) - exactly why
+  batching/resumability matters most here.
 
 ### Fixed
 - `front/config.php`'s legacy `../../../inc/includes.php` relative include

@@ -17,6 +17,7 @@ use GlpiPlugin\Experiencekit\Application\EntityScopedActorResolver;
 use GlpiPlugin\Experiencekit\Application\RunContext;
 use GlpiPlugin\Experiencekit\Domain\Exception\GenerationException;
 use GlpiPlugin\Experiencekit\Domain\GenerationPhase;
+use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\ActiveUserFinder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\RandomDataProvider;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\SequentialPhaseBuilder;
 use Item_Ticket;
@@ -46,8 +47,10 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
     private const PRINTER_INCIDENTS = 16;
     private const VPN_TOTAL_INCIDENTS = 29;
 
-    public function __construct(private readonly EntityScopedActorResolver $actors)
-    {
+    public function __construct(
+        private readonly EntityScopedActorResolver $actors,
+        private readonly ActiveUserFinder $users,
+    ) {
     }
 
     public function getPhase(): GenerationPhase
@@ -75,7 +78,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
     private function createPatchingChange(RunContext $context, int $seq): void
     {
         $rng = new RandomDataProvider($context->seed());
-        $requesterId = $this->randomUserByProfile($context, 'Technician', $seq);
+        $requesterId = $this->users->randomByProfile($context, 'Technician', $seq);
         $entitiesId = $this->actors->entityForRequester($requesterId);
 
         // 1/month going back from now; evening maintenance window.
@@ -102,7 +105,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
 
     private function createFirewallChange(RunContext $context, int $seq): void
     {
-        $requesterId = $this->randomUserByProfile($context, 'Technician', $seq + 1000);
+        $requesterId = $this->users->randomByProfile($context, 'Technician', $seq + 1000);
         $entitiesId = $this->actors->entityForRequester($requesterId);
         $date = date('Y-m-d H:i:s', strtotime('-' . ($seq * 3) . ' months'));
 
@@ -141,7 +144,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
         $printersId = $printerIds[$printerIndex];
 
         $rng = new RandomDataProvider($context->seed());
-        $requesterId = $this->randomUser($context, $seq + 2000);
+        $requesterId = $this->users->random($context, $seq + 2000);
         $entitiesId = $this->actors->entityForRequester($requesterId);
         $date = date('Y-m-d H:i:s', strtotime('-' . $rng->intBetween(1, 180, $seq + 2000) . ' days'));
 
@@ -181,7 +184,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
             }
         }
 
-        $requesterId = $this->randomUserByProfile($context, 'Technician', $printerIndex + 3000);
+        $requesterId = $this->users->randomByProfile($context, 'Technician', $printerIndex + 3000);
         $entitiesId = $this->actors->entityForRequester($requesterId);
 
         $problem = new Problem();
@@ -212,7 +215,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
         // 3 events: [0..9]=event0 (major+9 related), [10..19]=event1, [20..28]=event2 (major+8 related).
         [$eventIndex, $isMajor, $eventSeqs] = $this->vpnEventFor($seq);
 
-        $requesterId = $this->randomUser($context, $seq + 4000);
+        $requesterId = $this->users->random($context, $seq + 4000);
         $entitiesId = $this->actors->entityForRequester($requesterId);
         $date = date('Y-m-d H:i:s', strtotime('-' . $rng->intBetween(1, 365, $seq + 4000) . ' days'));
 
@@ -263,7 +266,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
             }
         }
 
-        $requesterId = $this->randomUserByProfile($context, 'Technician', $eventIndex + 5000);
+        $requesterId = $this->users->randomByProfile($context, 'Technician', $eventIndex + 5000);
         $entitiesId = $this->actors->entityForRequester($requesterId);
 
         $problem = new Problem();
@@ -336,7 +339,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
         ]);
         $this->assertCreated($id, 'Ticket', $seq);
 
-        $supervisorId = $this->randomUserByProfile($context, 'Supervisor', $seq + 6000);
+        $supervisorId = $this->users->randomByProfile($context, 'Supervisor', $seq + 6000);
         $validation = new \TicketValidation();
         $validationId = $validation->add([
             'tickets_id'      => (int) $id,
@@ -369,7 +372,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
         $exitedUser->getFromDB($exitedUserId);
         $endDate = $exitedUser->fields['end_date'] ?? date('Y-m-d H:i:s');
 
-        $supervisorId = $this->randomUserByProfile($context, 'Supervisor', $seq + 7000);
+        $supervisorId = $this->users->randomByProfile($context, 'Supervisor', $seq + 7000);
         $entitiesId = $this->actors->entityForRequester($supervisorId);
 
         $ticket = new Ticket();
@@ -425,7 +428,7 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
         }
         $computersId = $retiredComputerIds[$seq];
 
-        $requesterId = $this->randomUser($context, $seq + 8000);
+        $requesterId = $this->users->random($context, $seq + 8000);
         $entitiesId = $this->actors->entityForRequester($requesterId);
 
         $ticket = new Ticket();
@@ -535,101 +538,6 @@ final class ScenarioBuilder extends SequentialPhaseBuilder
             }
         }
         throw new GenerationException("Group \"{$name}\" was not created by OrgStructureBuilder.");
-    }
-
-    private function randomUser(RunContext $context, int $seq): int
-    {
-        $ids = $this->activeUserIds($context);
-        if (count($ids) === 0) {
-            throw new GenerationException('No active Users exist yet.');
-        }
-        $rng = new RandomDataProvider($context->seed());
-        return $ids[$rng->intBetween(0, count($ids) - 1, $seq)];
-    }
-
-    /**
-     * @return int[] Registered User ids that will actually pass
-     *               User::isValidUserForEntity() as an actor - not just
-     *               the entity/recursion check §5 is about, but also
-     *               is_active=1 and a valid begin_date/end_date window.
-     *               Picking an exited user as a scenario requester produces
-     *               the exact same silently-missing-actor-link symptom via
-     *               a different root cause; confirmed empirically (1 of 58
-     *               scenario tickets had no requester link before this).
-     */
-    private function activeUserIds(RunContext $context): array
-    {
-        static $cache = [];
-        $cacheKey = $context->runId();
-        if (isset($cache[$cacheKey])) {
-            return $cache[$cacheKey];
-        }
-
-        global $DB;
-        $userIds = $context->registeredIds('User', GenerationPhase::ORG_STRUCTURE);
-        if (count($userIds) === 0) {
-            return [];
-        }
-
-        $ids = [];
-        foreach ($DB->request([
-            'SELECT' => 'id',
-            'FROM'   => 'glpi_users',
-            'WHERE'  => [
-                'id'         => $userIds,
-                'is_deleted' => 0,
-                'is_active'  => 1,
-                ['OR' => [['begin_date' => null], ['begin_date' => ['<', new \Glpi\DBAL\QueryExpression('NOW()')]]]],
-                ['OR' => [['end_date' => null], ['end_date' => ['>', new \Glpi\DBAL\QueryExpression('NOW()')]]]],
-            ],
-        ]) as $row) {
-            $ids[] = (int) $row['id'];
-        }
-
-        return $cache[$cacheKey] = $ids;
-    }
-
-    /** @return array<int,int> profile name => cached user id list, keyed internally */
-    private function randomUserByProfile(RunContext $context, string $profileName, int $seq): int
-    {
-        static $cache = [];
-        $cacheKey = $context->runId() . '|' . $profileName;
-        if (!isset($cache[$cacheKey])) {
-            $cache[$cacheKey] = $this->userIdsByProfile($context, $profileName);
-        }
-        $ids = $cache[$cacheKey];
-        if (count($ids) === 0) {
-            throw new GenerationException("No registered users with profile \"{$profileName}\".");
-        }
-        $rng = new RandomDataProvider($context->seed());
-        return $ids[$rng->intBetween(0, count($ids) - 1, $seq)];
-    }
-
-    /** @return int[] Restricted to activeUserIds() - see its docblock. */
-    private function userIdsByProfile(RunContext $context, string $profileName): array
-    {
-        global $DB;
-
-        $userIds = $this->activeUserIds($context);
-        if (count($userIds) === 0) {
-            return [];
-        }
-
-        $matched = [];
-        foreach ($DB->request([
-            'SELECT' => 'glpi_profiles_users.users_id',
-            'FROM'   => 'glpi_profiles_users',
-            'INNER JOIN' => [
-                'glpi_profiles' => ['ON' => ['glpi_profiles_users' => 'profiles_id', 'glpi_profiles' => 'id']],
-            ],
-            'WHERE' => [
-                'glpi_profiles.name' => $profileName,
-                'glpi_profiles_users.users_id' => $userIds,
-            ],
-        ]) as $row) {
-            $matched[] = (int) $row['users_id'];
-        }
-        return $matched;
     }
 
     private function assertCreated($id, string $itemtype, int $seq): void
