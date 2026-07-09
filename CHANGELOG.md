@@ -52,6 +52,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   are resolved idempotently (find-by-name-or-create) and deliberately never
   registered for purge, since they're reusable GLPI-wide values, not this
   run's content.
+- `ItsmConfigBuilder`: the third phase builder - the 26-category tree
+  (5 parents × children), 3 calendars (Standard Business Hours, 24/7
+  Support, EMEA Business Hours), the default SLM, all 16 SLAs (4 tiers ×
+  2 ticket types × TTO/TTR), and all 22 `RuleTicket` business rules (14
+  keyword/category routing, urgent-priority escalation, VIP-requester SLA
+  assignment, category-tier SLA defaults, Bronze fallback defaults) -
+  extracted directly from the original hand-built dataset still present in
+  this dev database as the ground-truth reference, not re-derived from the
+  doc's prose. ITSM configuration is deliberately organization-wide shared
+  state (like CmdbBuilder's taxonomy) - created once, reused by later runs,
+  same as States/Manufacturers - since duplicate parallel rule engines
+  across runs would conflict with each other in the same GLPI instance.
 
 ### Fixed
 - `front/config.php`'s legacy `../../../inc/includes.php` relative include
@@ -87,3 +99,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   than one bucket of a million-wide weighted range. Replaced with the same
   proven per-call `RandomDataProvider::weightedPick()` already used
   correctly for state assignment.
+- `Migration::createRule()` has a real bug in GLPI core: its guard is
+  `is_a($rule['sub_type'], Rule::class)`, and PHP's `is_a()` returns `false`
+  for a class-name string unless `$allow_string=true` is passed - which
+  `createRule()` never does. Confirmed against GLPI's own install
+  migrations, which would hit the identical issue. Every rule after the
+  first name collision was silently dropped. Rebuilt rule creation directly
+  via `RuleTicket`/`RuleCriteria`/`RuleAction`'s own `add()` methods instead.
+- `SequentialPhaseBuilder`'s resumability (registered-count vs. target)
+  cannot terminate for a stage where some target items are legitimately
+  found-not-created (e.g. rule names colliding with pre-existing ones):
+  registeredCount can never reach the target, so the phase re-attempts the
+  same already-satisfied items every batch tick forever. Confirmed
+  empirically (completed_units reached 367 against a total of 22). Moved
+  rule creation out of the stage-counting pattern entirely, matching how
+  CmdbBuilder's taxonomy is already handled.

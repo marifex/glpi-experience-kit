@@ -7,6 +7,7 @@ namespace GlpiPlugin\Experiencekit\Infrastructure\Support;
 use GlpiPlugin\Experiencekit\Application\GenerationOrchestrator;
 use GlpiPlugin\Experiencekit\Domain\GenerationPhase;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\CmdbBuilder;
+use GlpiPlugin\Experiencekit\Infrastructure\Builder\ItsmConfigBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\OrgStructureBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\PhaseProgressRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\RegistryRepository;
@@ -40,6 +41,7 @@ final class OrchestratorFactory
         return [
             GenerationPhase::ORG_STRUCTURE->value => new OrgStructureBuilder(),
             GenerationPhase::CMDB->value          => new CmdbBuilder(),
+            GenerationPhase::ITSM_CONFIG->value   => new ItsmConfigBuilder(),
         ];
     }
 }
