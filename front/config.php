@@ -19,6 +19,7 @@
 require_once GLPI_ROOT . '/inc/includes.php';
 
 use GlpiPlugin\Experiencekit\Domain\VolumeProfileFactory;
+use GlpiPlugin\Experiencekit\Infrastructure\Persistence\HealthCheckRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\PhaseProgressRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\RegistryRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Support\OrchestratorFactory;
@@ -26,6 +27,8 @@ use GlpiPlugin\Experiencekit\Infrastructure\Support\OrchestratorFactory;
 Session::checkRight(PluginExperiencekitRun::$rightname, READ);
 
 $orchestrator = OrchestratorFactory::make();
+$purgeOrchestrator = OrchestratorFactory::makePurgeOrchestrator();
+$healthCheckService = OrchestratorFactory::makeHealthCheckService();
 
 if (isset($_POST['start_run'])) {
     Session::checkRight(PluginExperiencekitRun::$rightname, CREATE);
@@ -89,11 +92,58 @@ if (isset($_POST['cancel_run'])) {
     Html::back();
 }
 
+if (isset($_POST['start_purge'])) {
+    Session::checkRight(PluginExperiencekitRun::$rightname, PURGE);
+    $run = new PluginExperiencekitRun();
+    if ($run->getFromDB((int) $_POST['runs_id'])) {
+        $purgeOrchestrator->startPurge($run);
+        // Bounded first pass, same reasoning as run_now: visible progress
+        // without a synchronous-request timeout risk; the cron task (or
+        // clicking "Purge now" again) carries the rest.
+        for ($i = 0; $i < 10; $i++) {
+            $run->getFromDB($run->getID());
+            if ($run->fields['status'] !== PluginExperiencekitRun::STATUS_PURGING) {
+                break;
+            }
+            $purgeOrchestrator->purgeNextBatch($run, 100);
+        }
+    }
+    Html::back();
+}
+
+if (isset($_POST['purge_now'])) {
+    Session::checkRight(PluginExperiencekitRun::$rightname, PURGE);
+    $run = new PluginExperiencekitRun();
+    if ($run->getFromDB((int) $_POST['runs_id'])) {
+        for ($i = 0; $i < 10; $i++) {
+            $run->getFromDB($run->getID());
+            if ($run->fields['status'] !== PluginExperiencekitRun::STATUS_PURGING) {
+                break;
+            }
+            $purgeOrchestrator->purgeNextBatch($run, 100);
+        }
+    }
+    Html::back();
+}
+
+if (isset($_POST['health_check'])) {
+    Session::checkRight(PluginExperiencekitRun::$rightname, READ);
+    $runsId = (int) $_POST['runs_id'];
+    $healthCheckService->run($runsId > 0 ? $runsId : null);
+    $_SESSION['ek_last_health_check_run'] = $runsId > 0 ? $runsId : 'all';
+    Html::back();
+}
+
 Html::header(PluginExperiencekitRun::getTypeName(2), '', 'tools', 'PluginExperiencekitRun');
 
 $runRepo = new PluginExperiencekitRun();
 $activeRuns = $runRepo->find([
-    'status' => [PluginExperiencekitRun::STATUS_RUNNING, PluginExperiencekitRun::STATUS_PAUSED, PluginExperiencekitRun::STATUS_PENDING],
+    'status' => [
+        PluginExperiencekitRun::STATUS_RUNNING,
+        PluginExperiencekitRun::STATUS_PAUSED,
+        PluginExperiencekitRun::STATUS_PENDING,
+        PluginExperiencekitRun::STATUS_PURGING,
+    ],
 ], ['date_creation DESC']);
 
 $recentRuns = $runRepo->find([], ['date_creation DESC'], 10);
@@ -121,6 +171,21 @@ if (count($activeRuns) > 0) {
             $run->fields['organization_name'],
             $run->fields['volume_profile']
         )) . '</p>';
+
+        if ($run->fields['status'] === PluginExperiencekitRun::STATUS_PURGING) {
+            $remaining = array_sum($purgeOrchestrator->preview($run->getID()));
+            echo "<div class='mb-2'>";
+            echo '<p>' . htmlescape(sprintf(__('%d record(s) remaining to remove.', 'experiencekit'), $remaining)) . '</p>';
+            echo '</div>';
+
+            echo "<form method='post' action='" . htmlescape($selfUrl) . "' class='d-inline'>";
+            echo Html::hidden('runs_id', ['value' => $run->getID()]);
+            echo Html::submit(__('Purge now', 'experiencekit'), ['name' => 'purge_now', 'class' => 'btn btn-primary btn-sm']);
+            Html::closeForm();
+
+            echo '</div></div>';
+            continue;
+        }
 
         echo "<div id='ek-progress-" . $run->getID() . "' data-runs-id='" . $run->getID() . "'>";
         foreach ($progressRepository->allForRun($run) as $phaseValue => $progress) {
@@ -182,6 +247,59 @@ if (count($activeRuns) > 0) {
     echo '</div></div>';
 }
 
+// --- Health check results (just-triggered, shown once) ---------------------
+if (isset($_SESSION['ek_last_health_check_run'])) {
+    $checkedRunsId = $_SESSION['ek_last_health_check_run'];
+    unset($_SESSION['ek_last_health_check_run']);
+
+    // latestForRun() only fetches rows scoped to one run; an "all runs"
+    // check is persisted with runs_id NULL, so fetch by recency instead.
+    $results = [];
+    if ($checkedRunsId === 'all') {
+        foreach ($GLOBALS['DB']->request([
+            'FROM'  => 'glpi_plugin_experiencekit_healthchecks',
+            'WHERE' => ['runs_id' => null],
+            'ORDER' => 'date_creation DESC',
+            'LIMIT' => 10,
+        ]) as $checkRow) {
+            $item = new PluginExperiencekitHealthcheck();
+            $item->getFromDB($checkRow['id']);
+            $results[] = $item;
+        }
+    } else {
+        $results = (new HealthCheckRepository())->latestForRun((int) $checkedRunsId);
+    }
+
+    echo "<div class='card mt-3'><div class='card-body'>";
+    echo '<h3>' . htmlescape(__('Health check results', 'experiencekit')) . '</h3>';
+    if (count($results) === 0) {
+        echo '<p class="text-muted">' . htmlescape(__('No results.', 'experiencekit')) . '</p>';
+    } else {
+        foreach ($results as $result) {
+            $badgeClass = match ($result->fields['status']) {
+                PluginExperiencekitHealthcheck::STATUS_PASS => 'bg-success',
+                PluginExperiencekitHealthcheck::STATUS_WARN => 'bg-warning',
+                default => 'bg-danger',
+            };
+            $details = json_decode($result->fields['details_json'] ?? '[]', true) ?: [];
+            $summary = $details['summary'] ?? '';
+            $label = $details['label'] ?? $result->fields['check_key'];
+            unset($details['summary'], $details['label']);
+
+            echo '<div class="mb-2"><span class="badge ' . $badgeClass . '">' . htmlescape(strtoupper($result->fields['status'])) . '</span> ';
+            echo '<strong>' . htmlescape($label) . '</strong>';
+            if ($summary !== '') {
+                echo ' — ' . htmlescape($summary);
+            }
+            if (!empty($details)) {
+                echo ' <small class="text-muted">' . htmlescape(json_encode($details)) . '</small>';
+            }
+            echo '</div>';
+        }
+    }
+    echo '</div></div>';
+}
+
 // --- Recent runs -----------------------------------------------------------
 echo "<div class='card mt-3'><div class='card-body'>";
 echo '<h3>' . htmlescape(__('Recent runs', 'experiencekit')) . '</h3>';
@@ -189,7 +307,7 @@ if (count($recentRuns) === 0) {
     echo '<p class="text-muted">' . htmlescape(__('No runs yet.', 'experiencekit')) . '</p>';
 } else {
     echo "<table class='table table-sm'><thead><tr>";
-    foreach ([__('Name', 'experiencekit'), __('Profile', 'experiencekit'), __('Status', 'experiencekit'), __('Created', 'experiencekit')] as $header) {
+    foreach ([__('Name', 'experiencekit'), __('Profile', 'experiencekit'), __('Status', 'experiencekit'), __('Records', 'experiencekit'), __('Created', 'experiencekit'), __('Actions', 'experiencekit')] as $header) {
         echo '<th>' . htmlescape($header) . '</th>';
     }
     echo '</tr></thead><tbody>';
@@ -197,11 +315,30 @@ if (count($recentRuns) === 0) {
         $run = new PluginExperiencekitRun();
         $run->getFromDB($row['id']);
         $counts = $registryRepository->countsByItemtypeForRun($run->getID());
+        $total = array_sum($counts);
         echo '<tr>';
         echo '<td>' . htmlescape($run->fields['name']) . '</td>';
         echo '<td>' . htmlescape($run->fields['volume_profile']) . '</td>';
         echo '<td>' . htmlescape($run->getStatusLabel()) . '</td>';
+        echo '<td>' . $total . '</td>';
         echo '<td>' . htmlescape($run->fields['date_creation']) . '</td>';
+        echo '<td>';
+        if ($total > 0) {
+            echo "<form method='post' action='" . htmlescape($selfUrl) . "' class='d-inline'>";
+            echo Html::hidden('runs_id', ['value' => $run->getID()]);
+            echo Html::submit(__('Health check', 'experiencekit'), ['name' => 'health_check', 'class' => 'btn btn-outline-primary btn-sm']);
+            Html::closeForm();
+        }
+        if ($run->fields['status'] === PluginExperiencekitRun::STATUS_COMPLETED || $run->fields['status'] === PluginExperiencekitRun::STATUS_FAILED) {
+            echo " <form method='post' action='" . htmlescape($selfUrl) . "' class='d-inline' onsubmit=\"return confirm(" . htmlescape(json_encode(sprintf(
+                __('Permanently delete all %d record(s) this run generated? This cannot be undone.', 'experiencekit'),
+                $total
+            ))) . ")\">";
+            echo Html::hidden('runs_id', ['value' => $run->getID()]);
+            echo Html::submit(__('Purge', 'experiencekit'), ['name' => 'start_purge', 'class' => 'btn btn-outline-danger btn-sm']);
+            Html::closeForm();
+        }
+        echo '</td>';
         echo '</tr>';
     }
     echo '</tbody></table>';

@@ -80,4 +80,10 @@ final class PhaseProgressRepository
             'last_error' => $error,
         ]);
     }
+
+    public function deleteForRun(int $runsId): void
+    {
+        global $DB;
+        $DB->delete(PluginExperiencekitPhaseProgress::getTable(), ['runs_id' => $runsId]);
+    }
 }

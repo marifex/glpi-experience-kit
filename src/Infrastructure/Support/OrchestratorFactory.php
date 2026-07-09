@@ -6,6 +6,8 @@ namespace GlpiPlugin\Experiencekit\Infrastructure\Support;
 
 use GlpiPlugin\Experiencekit\Application\EntityScopedActorResolver;
 use GlpiPlugin\Experiencekit\Application\GenerationOrchestrator;
+use GlpiPlugin\Experiencekit\Application\HealthCheckService;
+use GlpiPlugin\Experiencekit\Application\PurgeOrchestrator;
 use GlpiPlugin\Experiencekit\Domain\GenerationPhase;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\BulkTicketBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\CmdbBuilder;
@@ -14,6 +16,7 @@ use GlpiPlugin\Experiencekit\Infrastructure\Builder\KbAttachmentSurveyBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\OrgStructureBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\ScenarioBuilder;
 use GlpiPlugin\Experiencekit\Infrastructure\Builder\Support\ActiveUserFinder;
+use GlpiPlugin\Experiencekit\Infrastructure\Persistence\HealthCheckRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\PhaseProgressRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\RegistryRepository;
 use GlpiPlugin\Experiencekit\Infrastructure\Persistence\RunRepository;
@@ -37,6 +40,24 @@ final class OrchestratorFactory
             new PhaseProgressRepository(),
             self::builders($DB),
         );
+    }
+
+    public static function makePurgeOrchestrator(): PurgeOrchestrator
+    {
+        global $DB;
+
+        return new PurgeOrchestrator(
+            new RegistryRepository($DB),
+            new RunRepository(),
+            new PhaseProgressRepository(),
+        );
+    }
+
+    public static function makeHealthCheckService(): HealthCheckService
+    {
+        global $DB;
+
+        return new HealthCheckService($DB, new HealthCheckRepository());
     }
 
     /** @return array<string,\GlpiPlugin\Experiencekit\Application\PhaseBuilderInterface> */

@@ -70,9 +70,12 @@ class PluginExperiencekitRun extends CommonDBTM
 
     /**
      * GLPI cron entry point (registered as PluginExperiencekitRun /
-     * ProcessBatch in hook.php). Advances every currently-running run by
-     * one bounded batch. A run that fails or completes mid-loop does not
-     * stop the others from being processed in the same tick.
+     * ProcessBatch in hook.php). Advances every currently-running run one
+     * bounded batch, then every currently-purging run one bounded batch -
+     * the same tick drives both generation and purge, since they're the
+     * same "advance until done" shape. A run that fails or completes
+     * mid-loop does not stop the others from being processed in the same
+     * tick.
      *
      * @return int >0 done, 0 nothing to do
      */
@@ -85,19 +88,33 @@ class PluginExperiencekitRun extends CommonDBTM
 
         $repository = new \GlpiPlugin\Experiencekit\Infrastructure\Persistence\RunRepository();
         $runningRuns = $repository->findByStatus(self::STATUS_RUNNING);
+        $purgingRuns = $repository->findByStatus(self::STATUS_PURGING);
 
-        if (count($runningRuns) === 0) {
+        if (count($runningRuns) === 0 && count($purgingRuns) === 0) {
             return 0;
         }
 
-        $orchestrator = \GlpiPlugin\Experiencekit\Infrastructure\Support\OrchestratorFactory::make();
+        if (count($runningRuns) > 0) {
+            $orchestrator = \GlpiPlugin\Experiencekit\Infrastructure\Support\OrchestratorFactory::make();
+            foreach ($runningRuns as $run) {
+                try {
+                    $orchestrator->runNextBatch($run, $batchSize);
+                    $task->addVolume(1);
+                } catch (\Throwable $e) {
+                    $task->log('Run #' . $run->getID() . ' failed: ' . $e->getMessage());
+                }
+            }
+        }
 
-        foreach ($runningRuns as $run) {
-            try {
-                $orchestrator->runNextBatch($run, $batchSize);
-                $task->addVolume(1);
-            } catch (\Throwable $e) {
-                $task->log('Run #' . $run->getID() . ' failed: ' . $e->getMessage());
+        if (count($purgingRuns) > 0) {
+            $purgeOrchestrator = \GlpiPlugin\Experiencekit\Infrastructure\Support\OrchestratorFactory::makePurgeOrchestrator();
+            foreach ($purgingRuns as $run) {
+                try {
+                    $purgeOrchestrator->purgeNextBatch($run, $batchSize);
+                    $task->addVolume(1);
+                } catch (\Throwable $e) {
+                    $task->log('Purge of run #' . $run->getID() . ' failed: ' . $e->getMessage());
+                }
             }
         }
 

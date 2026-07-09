@@ -102,6 +102,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   (~30% of closed tickets, weighted 1★=5%/2★=7%/3★=18%/4★=35%/5★=35%).
   This closes the full pipeline: a Small-profile run through all six
   phases now reaches `status=completed` end to end for the first time.
+- `HealthCheckService` - automated regression checks so the §5 bug class
+  can never ship silently again: requester-actor-link coverage for
+  Ticket/Problem/Change (the doc's own verification query, generalized to
+  all three itemtypes and scoped to registry-tracked records only, so a
+  customer's own data is never flagged), plus a registry-consistency
+  check for records deleted outside the plugin. Verified against live
+  data both ways: a clean run passes all checks, and deliberately
+  deleting one ticket's requester link is correctly caught
+  ("1 of 750 records are missing a requester link").
+- `PurgeOrchestrator` - registry-driven, bounded/resumable deletion
+  (reverse creation order, same batching/cron-driven shape as
+  generation). Every delete is scoped to registry rows only, so a run can
+  never touch a record it didn't create - confirmed against live data: a
+  full Small-profile run's 1,522 records across 21 itemtypes were removed
+  cleanly, the database returned to its exact pre-existing baseline, and
+  the run row itself is kept (marked `purged`) as a history record rather
+  than deleted.
+- Admin UI: Purge (with a confirmation prompt showing the exact record
+  count) and Health Check actions on the Recent Runs table, a live
+  progress view for in-progress purges, and a results panel for the most
+  recently run health check.
 
 ### Fixed
 - `front/config.php`'s legacy `../../../inc/includes.php` relative include
@@ -189,3 +210,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `getFromDB()`/`delete()` key off the same `getIndexName()`, so
   registering that returned value is exactly what a later purge needs,
   despite looking like the wrong id at first glance.
+- The `getIndexName() !== 'id'` lesson above resurfaced twice more once
+  purge/health-check code needed to look records up generically across
+  every itemtype the plugin creates, rather than one builder knowing its
+  own object's shape: `HealthCheckService`'s registry-orphan check
+  hardcoded the `id` column, wrongly flagging every `TicketSatisfaction`
+  row as "orphaned" (confirmed empirically: 203 of 203 flagged, a 100%
+  false-positive rate) - fixed by querying `$itemtype::getIndexName()`
+  instead of assuming `id`. `PurgeOrchestrator::purgeNextBatch()` had the
+  same issue in its `delete()` call, which "worked" but silently logged
+  an `Undefined array key "tickets_id"` warning on every `TicketSatisfaction`
+  deletion - fixed the same way.
