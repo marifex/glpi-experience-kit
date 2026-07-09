@@ -19,12 +19,16 @@ use GlpiPlugin\Experiencekit\Application\RunContext;
 abstract class SequentialPhaseBuilder implements PhaseBuilderInterface
 {
     /**
-     * @return array<int,array{itemtype:string,target:int,create:callable(int):void}>
+     * @return array<int,array{itemtype:string,target:int,create:callable(int):void,tag?:string}>
      *         Ordered list of stages. $create is called with the stage-local
      *         sequence index (0-based) for each unit still needed. Building
      *         this array must be cheap and must not eagerly resolve data
      *         that only exists once an earlier stage has finished - do that
-     *         lazily inside the $create closure itself.
+     *         lazily inside the $create closure itself. Set 'tag' when two
+     *         stages register the same itemtype under this phase (e.g. two
+     *         scenarios both creating Change records) - without it their
+     *         progress would be conflated and neither target tracked
+     *         correctly.
      */
     abstract protected function stages(RunContext $context): array;
 
@@ -44,10 +48,11 @@ abstract class SequentialPhaseBuilder implements PhaseBuilderInterface
         $allDone = true;
 
         foreach ($this->stages($context) as $stage) {
+            $tag = $stage['tag'] ?? null;
             if ($remaining > 0) {
-                $remaining = $this->processStage($context, $remaining, $processed, $stage['itemtype'], $stage['target'], $stage['create']);
+                $remaining = $this->processStage($context, $remaining, $processed, $stage['itemtype'], $stage['target'], $stage['create'], $tag);
             }
-            if ($context->registeredCount($stage['itemtype'], $this->getPhase()) < $stage['target']) {
+            if ($context->registeredCount($stage['itemtype'], $this->getPhase(), $tag) < $stage['target']) {
                 $allDone = false;
             }
         }
@@ -56,9 +61,9 @@ abstract class SequentialPhaseBuilder implements PhaseBuilderInterface
     }
 
     /** Processes up to $remaining units of one stage. Returns the batch budget left. */
-    private function processStage(RunContext $context, int $remaining, int &$processed, string $itemtype, int $target, callable $createOne): int
+    private function processStage(RunContext $context, int $remaining, int &$processed, string $itemtype, int $target, callable $createOne, ?string $tag): int
     {
-        $existing = $context->registeredCount($itemtype, $this->getPhase());
+        $existing = $context->registeredCount($itemtype, $this->getPhase(), $tag);
         $need = max(0, $target - $existing);
         $count = min($need, $remaining);
 

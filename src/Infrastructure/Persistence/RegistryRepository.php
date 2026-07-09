@@ -31,12 +31,23 @@ final class RegistryRepository
         ]);
     }
 
-    /** @return int[] items_id values, in creation order. */
-    public function findItemsIdsForRun(int $runsId, string $itemtype, ?GenerationPhase $phase = null): array
+    /**
+     * @return int[] items_id values, in creation order.
+     *
+     * $scenarioTag disambiguates stages that register the same itemtype
+     * under the same phase but need independently-tracked targets - e.g.
+     * the patching and firewall scenarios both create Change records; without
+     * this, registeredCount('Change', SCENARIOS) would conflate the two and
+     * either stage could appear "done" using the other's progress.
+     */
+    public function findItemsIdsForRun(int $runsId, string $itemtype, ?GenerationPhase $phase = null, ?string $scenarioTag = null): array
     {
         $where = ['runs_id' => $runsId, 'itemtype' => $itemtype];
         if ($phase !== null) {
             $where['phase'] = $phase->value;
+        }
+        if ($scenarioTag !== null) {
+            $where['scenario_tag'] = $scenarioTag;
         }
 
         $ids = [];
@@ -51,9 +62,9 @@ final class RegistryRepository
         return $ids;
     }
 
-    public function countForRun(int $runsId, string $itemtype, ?GenerationPhase $phase = null): int
+    public function countForRun(int $runsId, string $itemtype, ?GenerationPhase $phase = null, ?string $scenarioTag = null): int
     {
-        return count($this->findItemsIdsForRun($runsId, $itemtype, $phase));
+        return count($this->findItemsIdsForRun($runsId, $itemtype, $phase, $scenarioTag));
     }
 
     public function isRegistered(string $itemtype, int $itemsId): bool

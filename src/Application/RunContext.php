@@ -39,16 +39,23 @@ final class RunContext
         return (int) $this->run->fields['seed'];
     }
 
-    /** @return int[] items_id values already created by this run for $itemtype, in creation order. */
-    public function registeredIds(string $itemtype, ?GenerationPhase $phase = null): array
+    /**
+     * @return int[] items_id values already created by this run for
+     *               $itemtype, in creation order. $scenarioTag narrows
+     *               further to one stage's own records - needed whenever
+     *               multiple stages in the same phase register the same
+     *               itemtype (e.g. two scenarios both creating Changes)
+     *               and must not conflate each other's progress.
+     */
+    public function registeredIds(string $itemtype, ?GenerationPhase $phase = null, ?string $scenarioTag = null): array
     {
-        $cacheKey = $itemtype . '|' . ($phase?->value ?? '*');
-        return $this->cache[$cacheKey] ??= $this->registry->findItemsIdsForRun($this->runId(), $itemtype, $phase);
+        $cacheKey = $itemtype . '|' . ($phase?->value ?? '*') . '|' . ($scenarioTag ?? '*');
+        return $this->cache[$cacheKey] ??= $this->registry->findItemsIdsForRun($this->runId(), $itemtype, $phase, $scenarioTag);
     }
 
-    public function registeredCount(string $itemtype, ?GenerationPhase $phase = null): int
+    public function registeredCount(string $itemtype, ?GenerationPhase $phase = null, ?string $scenarioTag = null): int
     {
-        return count($this->registeredIds($itemtype, $phase));
+        return count($this->registeredIds($itemtype, $phase, $scenarioTag));
     }
 
     /**
@@ -59,6 +66,11 @@ final class RunContext
     public function register(GenerationPhase $phase, string $itemtype, int $itemsId, ?string $scenarioTag = null): void
     {
         $this->registry->register($this->runId(), $phase, $itemtype, $itemsId, $scenarioTag);
-        unset($this->cache[$itemtype . '|' . $phase->value], $this->cache[$itemtype . '|*']);
+        unset(
+            $this->cache[$itemtype . '|' . $phase->value . '|*'],
+            $this->cache[$itemtype . '|*|*'],
+            $this->cache[$itemtype . '|' . $phase->value . '|' . ($scenarioTag ?? '*')],
+            $this->cache[$itemtype . '|*|' . ($scenarioTag ?? '*')],
+        );
     }
 }

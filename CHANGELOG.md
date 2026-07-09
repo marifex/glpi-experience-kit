@@ -64,6 +64,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   state (like CmdbBuilder's taxonomy) - created once, reused by later runs,
   same as States/Manufacturers - since duplicate parallel rule engines
   across runs would conflict with each other in the same GLPI instance.
+- `ScenarioBuilder`: the fourth phase builder - the 7 narrative ITIL chains
+  (§4): monthly Windows patching (24 Changes), quarterly firewall upgrade
+  (8 Changes, CAB-approved), printer failure cluster (16 Incidents → 3
+  correlated Problems via 3 real Printer assets), VPN outage (29 Incidents
+  across 3 major-incident events → 3 Problems → 3 emergency Changes,
+  CAB-approved), onboarding (N Service Requests tied to the onboarding
+  cohort's begin_date, Supervisor TicketValidation), offboarding (N Service
+  Requests tied to the exited cohort's end_date, asset reclaim), and laptop
+  replacement (tied to CmdbBuilder's `retired_computer`-tagged Computers,
+  Change_Ticket + Item_Ticket links, computer comment updated). Every
+  Ticket/Problem/Change gets an explicit requester via
+  `EntityScopedActorResolver` - not just Tickets, matching the original
+  dataset's "100% coverage" requirement for all three itemtypes.
+- `RegistryRepository`/`RunContext`: `scenario_tag`-aware
+  `registeredIds()`/`registeredCount()`, and a `tag` key on
+  `SequentialPhaseBuilder` stage definitions - needed once two stages in
+  the same phase register the same itemtype (e.g. patching and firewall
+  both creating `Change` records) and must track independent targets.
 
 ### Fixed
 - `front/config.php`'s legacy `../../../inc/includes.php` relative include
@@ -114,3 +132,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   empirically (completed_units reached 367 against a total of 22). Moved
   rule creation out of the stage-counting pattern entirely, matching how
   CmdbBuilder's taxonomy is already handled.
+- `ScenarioBuilder`'s onboarding/offboarding stage targets were hardcoded
+  to the Medium profile's exact counts (40/27) instead of reading
+  `$context->profile->usersOnboardingCohort`/`usersExited`, so a Small
+  profile run (target 6/4) kept trying to process sequence indices past
+  the actual cohort size once it ran out of users.
+- `User::isValidUserForEntity()` - the check §5's fix is built around -
+  also requires `is_active=1` and a valid `begin_date`/`end_date` window,
+  not just a correctly-derived entity. Picking an exited user as a
+  scenario requester produces the exact same silently-missing-actor-link
+  symptom via a different root cause. Confirmed empirically (1 of 58
+  scenario tickets had no requester link). `ScenarioBuilder`'s requester
+  pickers now restrict to `activeUserIds()`, replicating GLPI's own
+  validity condition so any picked user is guaranteed to pass.
+- `ChangeValidation`/`TicketValidation` status stayed `WAITING` (2) despite
+  passing `status => ACCEPTED` on `add()`: `prepareInputForAdd()`
+  unconditionally forces `WAITING` on creation, and the natural follow-up
+  `update()` silently strips `status` too, because
+  `prepareInputForUpdate()` only allows it when `canAnswer()` is true -
+  i.e. the *current session user* is the validation's actual target, which
+  a Super-Admin demo-generation session essentially never is. This is a
+  deliberate GLPI security gate, not a bug. Added a narrow, explicitly-
+  justified raw `UPDATE` of just the `status`/`validation_date` columns,
+  scoped to rows this same method just created.
