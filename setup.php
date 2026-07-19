@@ -13,7 +13,7 @@ if (!defined('GLPI_ROOT')) {
 
 require_once __DIR__ . '/autoload.php';
 
-define('PLUGIN_EXPERIENCEKIT_VERSION', '1.0.1');
+define('PLUGIN_EXPERIENCEKIT_VERSION', '1.0.2');
 define('PLUGIN_EXPERIENCEKIT_MIN_GLPI_VERSION', '11.0');
 define('PLUGIN_EXPERIENCEKIT_MAX_GLPI_VERSION', '11.99.99');
 
@@ -43,6 +43,19 @@ function plugin_init_experiencekit()
     if (PluginExperiencekitRun::canView()) {
         $PLUGIN_HOOKS['menu_toadd']['experiencekit'] = ['tools' => 'PluginExperiencekitRun'];
     }
+}
+
+/**
+ * GLPI's own install/activation flow calls plugin_<key>_check_config() if
+ * it exists (Plugin::install()/checkPluginState()) and only flags the
+ * plugin as needing configuration when it returns false - the function is
+ * optional and GLPI treats its absence as "nothing to configure", but
+ * defining it explicitly avoids relying on that implicit default and
+ * matches the convention most published GLPI plugins follow.
+ */
+function plugin_experiencekit_check_config(bool $verbose = false): bool
+{
+    return true;
 }
 
 /**

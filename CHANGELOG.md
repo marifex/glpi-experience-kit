@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-07-19
+
+### Fixed
+- `setup.php` was missing `plugin_experiencekit_check_config()`. GLPI's own install/activation flow
+  (`Plugin::install()`/`checkPluginState()`) calls `plugin_<key>_check_config()` if it exists and only
+  flags a plugin as needing configuration when it returns `false` - the function is technically optional
+  (GLPI treats its absence as "nothing to configure"), but most published GLPI plugins define it
+  explicitly, and relying on the implicit default was reported to cause activation issues on at least
+  one real-world GLPI setup (reported by @JamesM-echo-9, issue #1). Added, returning `true`
+  unconditionally (this plugin has no required external configuration before it can run).
+
 ## [1.0.1] - 2026-07-09
 
 Full Medium-profile QA (the volume profile that reproduces the original reference dataset's exact §3
