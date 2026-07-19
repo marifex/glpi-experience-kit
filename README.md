@@ -1,4 +1,4 @@
-# GLPI Experience Kit
+# Experience Kit for GLPI
 
 A GLPI 11 plugin that generates a realistic, fully configured enterprise ITSM
 environment — organization hierarchy, CMDB, contracts, knowledge base,
@@ -54,7 +54,7 @@ data.
 ## Installation
 
 1. Copy or symlink this directory to `<glpi>/plugins/experiencekit`.
-2. In GLPI: Setup > Plugins > GLPI Experience Kit > Install > Enable.
+2. In GLPI: Setup > Plugins > Experience Kit for GLPI > Install > Enable.
 3. Setup > Profiles > (your profile) > Experience Kit tab: grant the right
    to the profiles that should be able to generate/purge data. By default
    only profiles with Setup > General (config) read+write get it.

@@ -1,7 +1,7 @@
 <?php
 /**
  * -------------------------------------------------------------------------
- * GLPI Experience Kit plugin for GLPI 11
+ * Experience Kit for GLPI - a plugin for GLPI 11
  * -------------------------------------------------------------------------
  * Main admin screen (Setup > Plugins gear icon, and the "Experience Kit"
  * entry under Tools): start/monitor/control generation runs.

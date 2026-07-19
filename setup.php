@@ -1,7 +1,7 @@
 <?php
 /**
  * -------------------------------------------------------------------------
- * GLPI Experience Kit plugin for GLPI 11
+ * Experience Kit for GLPI - a plugin for GLPI 11
  * -------------------------------------------------------------------------
  * Registration, version declaration, and hook wiring.
  * -------------------------------------------------------------------------
@@ -13,7 +13,7 @@ if (!defined('GLPI_ROOT')) {
 
 require_once __DIR__ . '/autoload.php';
 
-define('PLUGIN_EXPERIENCEKIT_VERSION', '1.0.2');
+define('PLUGIN_EXPERIENCEKIT_VERSION', '1.0.3');
 define('PLUGIN_EXPERIENCEKIT_MIN_GLPI_VERSION', '11.0');
 define('PLUGIN_EXPERIENCEKIT_MAX_GLPI_VERSION', '11.99.99');
 
@@ -64,7 +64,7 @@ function plugin_experiencekit_check_config(bool $verbose = false): bool
 function plugin_version_experiencekit()
 {
     return [
-        'name'         => 'GLPI Experience Kit',
+        'name'         => 'Experience Kit for GLPI',
         'version'      => PLUGIN_EXPERIENCEKIT_VERSION,
         'author'       => 'MarifeX',
         'license'      => 'Proprietary',

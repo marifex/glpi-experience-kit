@@ -3,7 +3,7 @@
 ## Installing
 
 1. Copy or symlink this directory to `<glpi>/plugins/experiencekit`.
-2. Setup > Plugins > GLPI Experience Kit > **Install**, then **Enable**.
+2. Setup > Plugins > Experience Kit for GLPI > **Install**, then **Enable**.
    Installation creates four tables (`glpi_plugin_experiencekit_runs`, `..._registry`,
    `..._phase_progress`, `..._healthchecks`) and a `ProcessBatch` cron task.
 3. Setup > Profiles > (a profile) > **Experience Kit** tab: grant the right to any profile that should

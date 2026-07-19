@@ -1,7 +1,7 @@
 <?php
 /**
  * -------------------------------------------------------------------------
- * GLPI Experience Kit plugin for GLPI 11
+ * Experience Kit for GLPI - a plugin for GLPI 11
  * -------------------------------------------------------------------------
  * JSON progress-polling endpoint for the Generate tab's progress bars.
  */
